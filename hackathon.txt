@@ -1,0 +1,391 @@
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import hashes, hmac
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization
+import os
+import random
+import hashlib
+import getpass
+import scapy.all as scapy
+import time
+
+class PasswordStorage:
+    def __init__(self):
+        self.passwords = {}
+
+    def generate_salt(self):
+        return os.urandom(16)
+
+    def hash_password(self, password, salt):
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        hashed_password = kdf.derive(password.encode())
+        return hashed_password
+
+    def store_password(self, username, password):
+        salt = self.generate_salt()
+        hashed_password = self.hash_password(password, salt)
+        self.passwords[username] = (salt, hashed_password)
+
+    def verify_password(self, username, password):
+        salt, hashed_password = self.passwords.get(username)
+        if salt and hashed_password:
+            new_hashed_password = self.hash_password(password, salt)
+            return new_hashed_password == hashed_password
+        return False
+
+    def change_password(self, username, old_password, new_password):
+        if self.verify_password(username, old_password):
+            salt = self.generate_salt()
+            hashed_password = self.hash_password(new_password, salt)
+            self.passwords[username] = (salt, hashed_password)
+            return True
+        return False
+
+class KeyManager:
+    def __init__(self):
+        self.keys = {}
+
+    def generate_key_pair(self, key_size=2048):
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=key_size,
+        )
+        public_key = private_key.public_key()
+        return private_key, public_key
+
+    def serialize_key(self, key, password=None):
+        if password:
+            encryption_algorithm = serialization.BestAvailableEncryption(password)
+        else:
+            encryption_algorithm = serialization.NoEncryption()
+        pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=encryption_algorithm,
+        )
+        return pem
+
+    def deserialize_key(self, pem, password=None):
+        if password:
+            encryption_algorithm = serialization.BestAvailableEncryption(password)
+        else:
+            encryption_algorithm = serialization.NoEncryption()
+        private_key = serialization.load_pem_private_key(pem, password=password)
+        return private_key
+
+    def derive_key(self, password, salt, iterations=100000):
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=iterations,
+        )
+        key = kdf.derive(password)
+        return key
+
+    def store_key(self, key, key_id):
+        self.keys[key_id] = key
+
+    def retrieve_key(self, key_id):
+        return self.keys.get(key_id)
+
+    def delete_key(self, key_id):
+        del self.keys[key_id]
+
+key_manager = KeyManager()
+
+# Generate a key pair
+private_key, public_key = key_manager.generate_key_pair()
+
+# Serialize the private key
+pem = key_manager.serialize_key(private_key, password=b"my_secret_password")
+
+# Store the serialized key
+key_manager.store_key(pem, "my_key")
+
+# Retrieve the serialized key
+retrieved_pem = key_manager.retrieve_key("my_key")
+
+# Deserialize the private key
+retrieved_private_key = key_manager.deserialize_key(retrieved_pem, password=b"my_secret_password")
+
+# Derive a key from a password
+derived_key = key_manager.derive_key(b"my_password", b"my_salt")
+
+print(derived_key)
+
+
+# Generate a key pair
+private_key, public_key = key_manager.generate_key_pair()
+
+# Serialize the private key
+pem = key_manager.serialize_key(private_key, password=b"my_secret_password")
+
+# Store the serialized key
+key_manager.store_key(pem, "my_key")
+
+# Retrieve the serialized key
+retrieved_pem = key_manager.retrieve_key("my_key")
+
+# Deserialize the private key
+retrieved_private_key = key_manager.deserialize_key(retrieved_pem, password=b"my_secret_password")
+
+# Derive a key from a password
+derived_key = key_manager.derive_key(b"my_password", b"my_salt")
+
+print(derived_key)
+
+# Key derivation function (for demonstration purposes)
+def derive_key(password, salt):
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    return kdf.derive(password)
+
+# Encrypt a command
+def encrypt_command(command, key):
+    iv = os.urandom(16)  # Initialization vector
+    cipher = Cipher(algorithms.AES(key), modes.CFB(iv))
+    encryptor = cipher.encryptor()
+    encrypted_command = encryptor.update(command.encode()) + encryptor.finalize()
+    return iv + encrypted_command  # Prepend IV to the encrypted data
+
+# Decrypt a command
+def decrypt_command(encrypted_command, key):
+    iv = encrypted_command[:16]  # Extract IV
+    cipher = Cipher(algorithms.AES(key), modes.CFB(iv))
+    decryptor = cipher.decryptor()
+    return decryptor.update(encrypted_command[16:]) + decryptor.finalize()
+
+# Generate RSA key pair (private and public keys)
+private_key = rsa.generate_private_key(
+    public_exponent=65537,
+    key_size=2048,
+)
+
+public_key = private_key.public_key()
+
+# Sign a command
+def sign_command(command, private_key):
+    signature = private_key.sign(
+        command.encode(),
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+    return signature
+
+# Verify a command
+def verify_command(command, signature, public_key):
+    try:
+        public_key.verify(
+            signature,
+            command.encode(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return True
+    except:
+        return False
+
+class RandomnessGenerator:
+    def __init__(self):
+        pass
+
+    def generate_random_bytes(self, num_bytes):
+        return os.urandom(num_bytes)
+
+    def generate_random_integer(self, min_value, max_value):
+        return random.randint(min_value, max_value)
+
+    def generate_random_float(self, min_value, max_value):
+        return random.uniform(min_value, max_value)
+
+    def generate_random_string(self, length, characters="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"):
+        return ''.join(random.choice(characters) for _ in range(length))
+
+    def generate_random_boolean(self):
+        return random.choice([True, False])
+
+# Generate random bytes
+randomness_generator = RandomnessGenerator()
+random_bytes = randomness_generator.generate_random_bytes(16)
+print(random_bytes)
+
+# Generate random integer
+random_integer = randomness_generator.generate_random_integer(1, 100)
+print(random_integer)
+
+# Generate random float
+random_float = randomness_generator.generate_random_float(0.0, 1.0)
+print(random_float)
+
+# Generate random string
+random_string = randomness_generator.generate_random_string(10)
+print(random_string)
+
+# Generate random boolean
+random_boolean = randomness_generator.generate_random_boolean()
+print(random_boolean)
+
+# Create HMAC
+def create_hmac(key, data):
+    h = hmac.HMAC(key, hashes.SHA256())
+    h.update(data)
+    return h.finalize()
+
+class IntrusionDetectionSystem:
+    def __init__(self):
+        self.suspicious_packets = []
+
+    def sniff_packets(self, interface, timeout=10):
+        packets = scapy.sniff(iface=interface, timeout=timeout)
+        for packet in packets:
+            self.analyze_packet(packet)
+
+    def analyze_packet(self, packet):
+        # Check for suspicious packet characteristics
+        if packet.haslayer(scapy.TCP) and packet.getlayer(scapy.TCP).flags == 0x02:
+            # SYN packet, potential port scan
+            self.suspicious_packets.append(packet)
+        elif packet.haslayer(scapy.ICMP) and packet.getlayer(scapy.ICMP).type == 8:
+            # ICMP echo request, potential ping sweep
+            self.suspicious_packets.append(packet)
+        elif packet.haslayer(scapy.UDP) and packet.getlayer(scapy.UDP).dport == 53:
+            # DNS query, potential DNS amplification attack
+            self.suspicious_packets.append(packet)
+
+    def alert_on_suspicious_packets(self):
+        if len(self.suspicious_packets) > 0:
+            print("Suspicious packets detected!")
+            for packet in self.suspicious_packets:
+                print(packet.show())
+            self.suspicious_packets = []
+
+# Example usage
+ids = IntrusionDetectionSystem()
+interface = "Wi-Fi"  # Replace with your network interface
+
+while True:
+    ids.sniff_packets(interface)
+    ids.alert_on_suspicious_packets()
+    time.sleep(1)
+
+# Verify HMAC
+def verify_hmac(key, data, signature):
+    h = hmac.HMAC(key, hashes.SHA256())
+    h.update(data)
+    try:
+        h.verify(signature)
+        return True
+    except:
+        return False
+
+# Verify software update
+def verify_software_update(update_data, signature, public_key):
+    # Verify the signature of the update
+    return verify_command(update_data, signature, public_key)
+
+# Generate OTP
+def generate_otp():
+    return random.randint(100000, 999999)
+
+# Authenticate
+def authenticate(password, input_password, otp, input_otp):
+    return password == input_password and otp == input_otp
+
+# Verify firmware
+def verify_firmware(firmware_data, expected_hash):
+    firmware_hash = hashlib.sha256(firmware_data.encode()).hexdigest()
+    return firmware_hash == expected_hash
+
+# Detect intrusion
+def detect_intrusion(logins, threshold=5):
+    # Detects more than `threshold` login attempts in a short period
+    if logins > threshold:
+        return True
+    return False
+
+def main():
+    print("Welcome to the Secure System!")
+
+    # Get password from user
+    password = getpass.getpass("Enter your password: ").encode()
+    salt = os.urandom(16)  # This should be securely stored and reused
+    key = derive_key(password, salt)
+
+    while True:
+        print("\nChoose an option:")
+        print("1. Encrypt and decrypt a command")
+        print("2. Sign and verify a command")
+        print("3. Create and verify an HMAC")
+        print("4. Verify a software update")
+        print("5. Verify firmware")
+        print("6. Detect intrusion")
+        print("7. Quit")
+
+        choice = input("Enter your choice: ")
+
+        if choice == "1":
+            command = input("Enter a command: ")
+            encrypted_command = encrypt_command(command, key)
+            print(f"Encrypted command: {encrypted_command}")
+            decrypted_command = decrypt_command(encrypted_command, key)
+            print(f"Decrypted command: {decrypted_command.decode()}")
+
+        elif choice == "2":
+            command = input("Enter a command: ")
+            signature = sign_command(command, private_key)
+            print(f"Signature: {signature}")
+            is_valid = verify_command(command, signature, public_key)
+            print(f"Command valid: {is_valid}")
+
+        elif choice == "3":
+            hmac_key = getpass.getpass("Enter your HMAC key: ").encode()
+            data = input("Enter some data: ").encode()
+            hmac_signature = create_hmac(hmac_key, data)
+            print(f"HMAC Signature: {hmac_signature}")
+            is_valid = verify_hmac(hmac_key, data, hmac_signature)
+            print(f"Data integrity valid: {is_valid}")
+
+        elif choice == "4":
+            software_update = input("Enter a software update: ")
+            update_signature = sign_command(software_update, private_key)
+            received_update = software_update  # This should match exactly
+            is_update_valid = verify_software_update(received_update, update_signature, public_key)
+            print(f"Software update valid: {is_update_valid}")
+
+        elif choice == "5":
+            firmware_data = input("Enter firmware data: ")
+            expected_hash = input("Enter expected hash: ")
+            is_firmware_valid = verify_firmware(firmware_data, expected_hash)
+            print(f"Firmware valid: {is_firmware_valid}")
+
+        elif choice == "6":
+            logins = int(input("Enter number of login attempts: "))
+            is_intrusion_detected = detect_intrusion(logins)
+            print(f"Intrusion detected: {is_intrusion_detected}")
+
+        elif choice == "7":
+            print("Goodbye!")
+            break
+
+        else:
+            print("Invalid choice. Please try again.")
+
+if __name__ == "__main__":
+    main()
